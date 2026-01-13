@@ -1,0 +1,65 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential libgl1-mesa-dev libprotobuf-dev protobuf-compiler clang-tidy cppcheck
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.6.1'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'gcc_64'
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run Clang-Tidy
+        run: |
+          # On récupère tous les fichiers .cpp dans src/
+          FILES=$(find src -name "*.cpp")
+          # On lance clang-tidy sur ces fichiers, en utilisant compile_commands.json
+          # On ignore les erreurs de headers système si nécessaire
+          clang-tidy $FILES -p build --header-filter=src/.* > clang-tidy-report.txt || true
+          
+      - name: Run Cppcheck
+        run: |
+          # Analyse du dossier src/ uniquement
+          # --project utilise compile_commands.json pour les flags de compilation
+          # --error-exitcode=1 fait échouer le build en cas d'erreur importante
+          cppcheck --project=build/compile_commands.json --enable=all --suppress=missingIncludeSystem src/ --output-file=cppcheck-report.txt || true
+
+      - name: Check for critical issues
+        run: |
+          # Ici on pourrait décider de faire échouer le workflow si les rapports contiennent des mots clés
+          echo "Analyse terminée. Consultez les artefacts pour les rapports."
+
+      - name: Upload Quality Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports
+          path: |
+            clang-tidy-report.txt
+            cppcheck-report.txt

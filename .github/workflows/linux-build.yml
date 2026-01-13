@@ -1,0 +1,98 @@
+name: Build Linux
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential libgl1-mesa-dev libprotobuf-dev protobuf-compiler
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.6.1'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'gcc_64'
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B cmake-build-release -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cmake --build cmake-build-release --config Release
+
+      - name: Prepare AppImage
+        run: |
+          # Téléchargement de linuxdeploy et du plugin Qt
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          
+          # Préparation du AppDir
+          mkdir -p AppDir/usr/bin
+          cp cmake-build-release/TOTP_manager AppDir/usr/bin/
+          
+          # Création d'un fichier .desktop minimal
+          cat > AppDir/totp-manager.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=TOTP Manager
+          Exec=TOTP_manager
+          Icon=totp-manager
+          Categories=Utility;
+          EOF
+          
+          # Utilisation d'une icône par défaut (on pourrait en extraire une si dispo)
+          touch AppDir/totp-manager.png 
+          
+          # Génération de l'AppImage
+          export VERSION=1.0.0
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+          mv TOTP_Manager-*.AppImage TOTP_manager-x86_64.AppImage
+
+      - name: Prepare DEB Package
+        run: |
+          mkdir -p deb-package/usr/bin
+          mkdir -p deb-package/usr/share/applications
+          mkdir -p deb-package/DEBIAN
+          
+          cp cmake-build-release/TOTP_manager deb-package/usr/bin/
+          cp AppDir/totp-manager.desktop deb-package/usr/share/applications/
+          
+          cat > deb-package/DEBIAN/control <<EOF
+          Package: totp-manager
+          Version: 1.0.0
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Junie
+          Description: TOTP Manager Application
+          EOF
+          
+          dpkg-deb --build deb-package TOTP_manager.deb
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            TOTP_manager-x86_64.AppImage
+            TOTP_manager.deb

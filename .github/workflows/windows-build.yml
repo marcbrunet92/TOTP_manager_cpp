@@ -1,0 +1,87 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+          vcpkgGitCommitId: 'latest'
+          runVcpkgInstall: true
+          vcpkgJsonGlob: 'vcpkg.json' # Si présent, sinon il ignorera
+
+      - name: Install dependencies via vcpkg
+        run: |
+          ./vcpkg/vcpkg install protobuf:x64-mingw-dynamic
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.6.1' # Version stable de Qt6
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw'
+
+      - name: Setup MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B cmake-build-release -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic
+
+      - name: Build
+        run: |
+          cmake --build cmake-build-release --config Release
+
+      - name: Prepare Portable Version
+        shell: pwsh
+        run: |
+          mkdir portable
+          cp cmake-build-release/TOTP_manager.exe portable/
+          # windeployqt pour les DLL Qt
+          windeployqt --release --no-translations --compiler-runtime portable/TOTP_manager.exe
+          
+          # Les DLL Protobuf sont normalement copiées par CMake dans le build dir
+          # On les récupère depuis le répertoire de build
+          cp cmake-build-release/*.dll portable/
+
+      - name: Create Portable Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path portable/* -DestinationPath TOTP_manager-windows-portable.zip
+
+      - name: Prepare Installer (NSIS)
+        shell: pwsh
+        run: |
+          # Création d'un script NSIS minimaliste
+          $nsisScript = "!include `"MUI2.nsh`"`nName `"TOTP Manager`"`nOutFile `"TOTP_manager-setup.exe`"`nInstallDir `"`$PROGRAMFILES64\TOTP_manager`"`n`n!insertmacro MUI_PAGE_DIRECTORY`n!insertmacro MUI_PAGE_INSTFILES`n!insertmacro MUI_LANGUAGE `"French`"`n`nSection `"MainSection`" SEC01`n  SetOutPath `"`$INSTDIR`"`n  File /r `"portable\*`"`n  CreateShortcut `"`$DESKTOP\TOTP Manager.lnk`" `"`$INSTDIR\TOTP_manager.exe`"`n  WriteUninstaller `"`$INSTDIR\uninstall.exe`"`nSectionEnd"
+          $nsisScript | Out-File -FilePath installer.nsi -Encoding utf8
+          makensis installer.nsi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            TOTP_manager-windows-portable.zip
+            TOTP_manager-setup.exe
