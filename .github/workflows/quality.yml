@@ -1,65 +1,57 @@
-name: Code Quality
+name: Code Quality (C++)
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
 
 jobs:
   quality:
     runs-on: ubuntu-latest
-    
+
+    env:
+      BUILD_DIR: cmake-build-release
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Install dependencies
+      - name: Install tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libgl1-mesa-dev libprotobuf-dev protobuf-compiler clang-tidy cppcheck
+          sudo apt update
+          sudo apt install -y \
+            clang-tidy cppcheck \
+            cmake ninja-build \
+            qt6-base-dev protobuf-compiler
 
-      - name: Setup Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '6.6.1'
-          host: 'linux'
-          target: 'desktop'
-          arch: 'gcc_64'
-
-      - name: Configure CMake
+      - name: Configure CMake (Release)
         run: |
-          cmake -S . -B build -G "Ninja" \
+          cmake -S . -B $BUILD_DIR \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      - name: Run Clang-Tidy
+      - name: Run clang-tidy
         run: |
-          # On récupère tous les fichiers .cpp dans src/
-          FILES=$(find src -name "*.cpp")
-          # On lance clang-tidy sur ces fichiers, en utilisant compile_commands.json
-          # On ignore les erreurs de headers système si nécessaire
-          clang-tidy $FILES -p build --header-filter=src/.* > clang-tidy-report.txt || true
-          
-      - name: Run Cppcheck
-        run: |
-          # Analyse du dossier src/ uniquement
-          # --project utilise compile_commands.json pour les flags de compilation
-          # --error-exitcode=1 fait échouer le build en cas d'erreur importante
-          cppcheck --project=build/compile_commands.json --enable=all --suppress=missingIncludeSystem src/ --output-file=cppcheck-report.txt || true
+          clang-tidy \
+            $(find src -name "*.cpp") \
+            -p $BUILD_DIR \
+            --warnings-as-errors=* \
+            || true
 
-      - name: Check for critical issues
+      - name: Run cppcheck
         run: |
-          # Ici on pourrait décider de faire échouer le workflow si les rapports contiennent des mots clés
-          echo "Analyse terminée. Consultez les artefacts pour les rapports."
+          cppcheck src \
+            --enable=all \
+            --inconclusive \
+            --std=c++20 \
+            --error-exitcode=1 \
+            --exclude=$BUILD_DIR/generated
 
-      - name: Upload Quality Reports
+      - name: Upload reports
         uses: actions/upload-artifact@v4
         with:
-          name: quality-reports
+          name: code-quality-reports
           path: |
-            clang-tidy-report.txt
-            cppcheck-report.txt
+            $BUILD_DIR/compile_commands.json
