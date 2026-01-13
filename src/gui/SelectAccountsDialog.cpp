@@ -22,7 +22,7 @@ SelectAccountsDialog::SelectAccountsDialog(const std::vector<QVariantMap> &accou
         if (label.isEmpty()) label = "Compte";
 
         auto *item = new QListWidgetItem(label, m_listWidget);
-        item->setCheckState(Qt::Unchecked);
+        item->setCheckState(Qt::Checked);
         item->setData(Qt::UserRole, acc);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
     }
